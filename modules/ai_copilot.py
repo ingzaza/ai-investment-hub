@@ -15,8 +15,8 @@ def get_ai_analysis(ticker: str, summary_data: dict, prompt: str) -> str:
         if not api_key:
             return "⚠️ กรุณาตั้งค่า GEMINI_API_KEY ใน Streamlit Secrets ก่อนใช้งาน"
 
-        # ใช้โมเดล Gemini 1.5 Flash (รวดเร็วและฉลาด เหมาะกับการวิเคราะห์ข้อมูล)
-        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=api_key, temperature=0.3)
+        # แก้ไขชื่อโมเดลเติม -latest เพื่อแก้ปัญหา 404 NOT FOUND
+        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", google_api_key=api_key, temperature=0.3)
         
         # ปั้น Context ยัดใส่สมอง AI
         context = f"""
