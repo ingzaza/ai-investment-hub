@@ -5,19 +5,22 @@ modules/data_engine.py
   1. ตรวจสอบว่า ticker มีอยู่จริง (validate_ticker)
   2. ราคาเรียลไทม์ + ข้อมูลราคาย้อนหลัง (get_realtime_price, get_price_history)
   3. งบการเงินย้อนหลัง 5 ปี: Income Statement + Balance Sheet (get_financials)
-
-ทุกฟังก์ชันที่ยิง network ออกไปหา Yahoo Finance ถูกครอบด้วย @st.cache_data
-เพื่อ (ก) ลดความหน่วงเวลาโหลดหน้าเว็บซ้ำ ๆ (ข) ลดความเสี่ยงโดน Yahoo rate-limit
-TTL ถูกกำหนดจาก config.py แยกกันระหว่าง "ราคา" (สดบ่อย) กับ "งบการเงิน" (นิ่ง)
 """
 
 from __future__ import annotations
 
 import pandas as pd
+import requests
 import streamlit as st
 import yfinance as yf
 
 from config import PRICE_CACHE_TTL, FINANCIALS_CACHE_TTL, FINANCIALS_LOOKBACK_YEARS
+
+# สร้าง session พร้อมกำหนด User-Agent เพื่อป้องกันโดน Yahoo Finance บล็อกบน Streamlit Cloud
+session = requests.Session()
+session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+})
 
 
 # ============================================================================
@@ -25,14 +28,11 @@ from config import PRICE_CACHE_TTL, FINANCIALS_CACHE_TTL, FINANCIALS_LOOKBACK_YE
 # ============================================================================
 @st.cache_data(ttl=PRICE_CACHE_TTL, show_spinner=False)
 def validate_ticker(ticker: str) -> bool:
-    """
-    เช็คว่า ticker นี้มีข้อมูลจริงบน Yahoo Finance หรือไม่
-    ใช้ตอน Add ticker ใหม่ เพื่อกันผู้ใช้พิมพ์ผิด (เช่น "NVDAA")
-    """
+    """เช็คว่า ticker นี้มีข้อมูลจริงบน Yahoo Finance หรือไม่"""
     try:
-        info = yf.Ticker(ticker).fast_info
-        # fast_info.last_price จะ raise หรือเป็น None ถ้า ticker ไม่มีอยู่จริง
-        return info.get("last_price") is not None
+        tk = yf.Ticker(ticker, session=session)
+        fi = tk.fast_info
+        return fi.get("last_price") is not None
     except Exception:
         return False
 
@@ -42,14 +42,9 @@ def validate_ticker(ticker: str) -> bool:
 # ============================================================================
 @st.cache_data(ttl=PRICE_CACHE_TTL, show_spinner=False)
 def get_realtime_price(ticker: str) -> dict:
-    """
-    ดึงราคาล่าสุด + ข้อมูล snapshot สั้น ๆ ของหุ้น 1 ตัว
-    คืนค่าเป็น dict ที่พร้อมโชว์บน UI การ์ดสรุป
-
-    หมายเหตุ: ใช้ fast_info เป็นหลักเพราะเร็วกว่า .info มาก (ไม่ scrape หน้าเว็บทั้งหน้า)
-    """
+    """ดึงราคาล่าสุด + ข้อมูล snapshot สั้น ๆ ของหุ้น 1 ตัว"""
     try:
-        tk = yf.Ticker(ticker)
+        tk = yf.Ticker(ticker, session=session)
         fi = tk.fast_info
 
         last_price = fi.get("last_price")
@@ -81,31 +76,20 @@ def get_realtime_price(ticker: str) -> dict:
 
 @st.cache_data(ttl=PRICE_CACHE_TTL, show_spinner=False)
 def get_price_history(ticker: str, period: str = "5y", interval: str = "1d") -> pd.DataFrame:
-    """
-    ดึงราคาย้อนหลังแบบ time series (ใช้ต่อยอดใน Module 2: Growth / Max Drawdown / กราฟ)
-    period ตัวอย่าง: "1mo", "3mo", "1y", "5y"
-    """
+    """ดึงราคาย้อนหลังแบบ time series"""
     try:
-        df = yf.Ticker(ticker).history(period=period, interval=interval)
+        df = yf.Ticker(ticker, session=session).history(period=period, interval=interval)
         return df
     except Exception:
         return pd.DataFrame()
 
 
 # ============================================================================
-# 3) งบการเงินย้อนหลัง 5 ปี: Income Statement + Balance Sheet
+# 3) งบการเงินย้อนหลัง 5 ปี
 # ============================================================================
 @st.cache_data(ttl=FINANCIALS_CACHE_TTL, show_spinner=False)
 def get_financials(ticker: str) -> dict:
-    """
-    ดึงงบการเงินรายปีย้อนหลัง (สูงสุดตามที่ yfinance ให้ฟรี ปกติ ~4 ปี)
-    คืนค่า dict ที่มี 2 DataFrame หลัก: income_statement, balance_sheet
-    คอลัมน์ = ปีงบการเงิน (วันที่ปิดงบ), แถว = รายการบัญชี
-
-    หมายเหตุ: yfinance เวอร์ชันฟรีมักให้งบการเงินรายปีย้อนหลังจริงแค่ ~4 ปี
-    (ไม่ครบ 5 ปีเป๊ะเสมอไป) จึงตัด (slice) เท่าที่มีจริง แล้วส่ง flag
-    `years_available` กลับไปด้วย เพื่อให้ UI แจ้งผู้ใช้ตามจริงแทนที่จะ error
-    """
+    """ดึงงบการเงินรายปีย้อนหลัง"""
     result = {
         "ticker": ticker,
         "ok": False,
@@ -115,9 +99,9 @@ def get_financials(ticker: str) -> dict:
         "error": None,
     }
     try:
-        tk = yf.Ticker(ticker)
+        tk = yf.Ticker(ticker, session=session)
 
-        income_stmt = tk.financials          # รายปี, คอลัมน์เรียงจากปีล่าสุด -> เก่าสุด
+        income_stmt = tk.financials
         balance_sheet = tk.balance_sheet
 
         if income_stmt is None:
@@ -125,7 +109,6 @@ def get_financials(ticker: str) -> dict:
         if balance_sheet is None:
             balance_sheet = pd.DataFrame()
 
-        # จำกัดจำนวนปีตาม config (กันกรณี yfinance คืนมาเกินความจำเป็น)
         income_stmt = income_stmt.iloc[:, :FINANCIALS_LOOKBACK_YEARS]
         balance_sheet = balance_sheet.iloc[:, :FINANCIALS_LOOKBACK_YEARS]
 
@@ -135,7 +118,7 @@ def get_financials(ticker: str) -> dict:
         result["ok"] = not income_stmt.empty or not balance_sheet.empty
 
         if not result["ok"]:
-            result["error"] = "ไม่พบข้อมูลงบการเงินสำหรับ ticker นี้ (อาจเป็นหุ้นที่ yfinance ไม่รองรับงบเต็มรูปแบบ)"
+            result["error"] = "ไม่พบข้อมูลงบการเงินสำหรับ ticker นี้"
 
     except Exception as e:
         result["error"] = str(e)
@@ -144,7 +127,7 @@ def get_financials(ticker: str) -> dict:
 
 
 def clear_all_cache() -> None:
-    """ล้าง cache ทั้งหมดของ data_engine (ใช้ตอนผู้ใช้กด 'Refresh ข้อมูล' บน UI)"""
+    """ล้าง cache ทั้งหมดของ data_engine"""
     validate_ticker.clear()
     get_realtime_price.clear()
     get_price_history.clear()
