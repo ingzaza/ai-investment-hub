@@ -15,8 +15,8 @@ def get_ai_analysis(ticker: str, summary_data: dict, prompt: str) -> str:
         if not api_key:
             return "⚠️ กรุณาตั้งค่า GEMINI_API_KEY ใน Streamlit Secrets ก่อนใช้งาน"
 
-        # บังคับใช้โมเดล gemini-1.5-flash ให้เข้ากับกุญแจ AQ...
-        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=api_key, temperature=0.3)
+        # 🚀 เปลี่ยนมาใช้โมเดล gemini-2.5-flash รุ่นใหม่ล่าสุดของปี 2026 ที่มาแทนที่รุ่นเก่า
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=api_key, temperature=0.3)
         
         # ปั้น Context ยัดใส่สมอง AI
         context = f"""
