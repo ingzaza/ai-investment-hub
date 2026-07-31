@@ -4,8 +4,5 @@ pandas>=2.2.0
 numpy>=1.26.0
 scipy>=1.13.0
 plotly>=5.22.0
-
-# จะถูกใช้ใน Phase 3-4 (AI Co-Pilot) แต่ใส่ไว้ล่วงหน้าเพื่อให้ผู้ใช้ pip install ครั้งเดียว
 langchain>=0.2.0
-langchain-anthropic>=0.1.20
-anthropic>=0.31.0
+langchain-google-genai>=1.0.0
