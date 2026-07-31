@@ -192,75 +192,90 @@ def render_watchlist_overview(tickers: list[str]) -> None:
 # Main area: รายละเอียดหุ้นที่เลือก (Price detail + งบการเงิน 5 ปี)
 # ============================================================================
 def render_ticker_detail(ticker: str) -> None:
-    st.subheader(f"🔍 รายละเอียด: {ticker}")
+    st.subheader(f"🔍 รายละเอียดเจาะลึก: {ticker}")
 
+    # ดึงข้อมูลมาเตรียมไว้
     price_data = data_engine.get_realtime_price(ticker)
-
+    fin_data = data_engine.get_financials(ticker)
+    history_df = data_engine.get_price_history(ticker, period="5y")
+    
     if not price_data.get("ok"):
-        st.error(f"ไม่สามารถดึงข้อมูลราคาของ {ticker} ได้ ({price_data.get('error', 'unknown error')})")
+        st.error(f"ไม่สามารถดึงข้อมูลราคาของ {ticker} ได้")
         return
 
-    currency = price_data.get("currency", "")
+    # คำนวณ Analytics & Valuation (Phase 2)
+    summary = analytics_engine.get_stock_summary(price_data, fin_data)
+    
+    # ---------------------------------------------------------
+    # จัด Layout แบบ 2 ฝั่ง (ฝั่งซ้าย = Data, ฝั่งขวา = AI Chat)
+    # ---------------------------------------------------------
+    col_data, col_ai = st.columns([7, 3], gap="large")
 
-    # --- แถบสรุปราคา ---
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("ราคาล่าสุด", fmt_money(price_data.get("last_price"), currency),
-              fmt_pct(price_data.get("change_pct")))
-    m2.metric("ราคาปิดก่อนหน้า", fmt_money(price_data.get("previous_close"), currency))
-    m3.metric("สูงสุด/ต่ำสุด (วัน)",
-              f"{fmt_money(price_data.get('day_high'), '')} / {fmt_money(price_data.get('day_low'), '')}")
-    m4.metric("สูงสุด/ต่ำสุด (52 สัปดาห์)",
-              f"{fmt_money(price_data.get('year_high'), '')} / {fmt_money(price_data.get('year_low'), '')}")
+    with col_data:
+        # --- แถบสรุปราคา ---
+        currency = price_data.get("currency", "")
+        m1, m2, m3 = st.columns(3)
+        m1.metric("ราคาล่าสุด", fmt_money(price_data.get("last_price"), currency), fmt_pct(price_data.get("change_pct")))
+        m2.metric("P/E Ratio", f"{summary.get('pe_ratio', 0):.2f}x" if summary.get('pe_ratio') else "N/A")
+        m3.metric("Valuation Zone", summary.get('valuation_zone', 'N/A'))
+        st.divider()
 
-    st.caption(f"Market Cap: {fmt_large_number(price_data.get('market_cap'))} {currency}"
-               f"  |  Volume: {fmt_large_number(price_data.get('volume'))}")
+        # --- สร้าง 3 Tabs สำหรับดูข้อมูล ---
+        tab_price, tab_value, tab_scenario = st.tabs(["📈 ราคา & งบการเงิน", "📊 Value & Moat Analysis", "🔮 DCA & Stress Test"])
+        
+        with tab_price:
+            if not history_df.empty:
+                st.line_chart(history_df["Close"], height=250)
+            st.markdown("##### 🧾 งบการเงินแบบย่อ")
+            if fin_data["ok"]:
+                st.dataframe(fin_data["income_statement"].head(5), use_container_width=True)
+            else:
+                st.warning("ไม่พบข้อมูลงบการเงิน")
+                
+        with tab_value:
+            st.markdown("#### การประเมินมูลค่า และ ความแข็งแกร่ง (Phase 2)")
+            v1, v2, v3 = st.columns(3)
+            v1.metric("Graham Number (มูลค่าที่เหมาะสม)", fmt_money(summary.get("graham_number"), currency))
+            v2.metric("Margin of Safety (%)", fmt_pct(summary.get("margin_of_safety")))
+            v3.metric("Debt to Equity (หนี้สินต่อทุน)", f"{summary.get('debt_to_equity', 0):.2f}x" if summary.get('debt_to_equity') else "N/A")
+            st.info("💡 กฎสาย Value: พยายามซื้อหุ้นที่มี Margin of Safety เป็นบวก (ราคาตลาดถูกกว่า Graham Number) และ D/E ต่ำๆ")
 
-    st.divider()
+        with tab_scenario:
+            st.markdown("#### ทดสอบความเสี่ยง & DCA (Phase 3)")
+            max_dd = scenario_engine.calculate_max_drawdown(history_df)
+            st.error(f"📉 **Max Drawdown (5 ปีหลังสุด):** หุ้นตัวนี้เคยร่วงหนักสุด **{max_dd}%** จากจุดสูงสุด (รับความเสี่ยงนี้ได้หรือไม่?)")
+            
+            st.markdown("##### 💰 เครื่องมือจำลอง DCA")
+            c1, c2, c3 = st.columns(3)
+            monthly_inv = c1.number_input("ลงทุนต่อเดือน", value=5000, step=1000)
+            years_inv = c2.number_input("ระยะเวลา (ปี)", value=10, min_value=1, max_value=30)
+            expected_return = c3.number_input("ผลตอบแทนคาดหวัง (% ต่อปี)", value=8.0)
+            
+            dca_df = scenario_engine.simulate_dca(monthly_inv, years_inv, expected_return)
+            st.area_chart(dca_df)
 
-    # --- กราฟราคาย้อนหลัง ---
-    st.markdown("##### 📈 ราคาย้อนหลัง")
-    period_choice = st.select_slider(
-        "ช่วงเวลา",
-        options=["1mo", "3mo", "1y", "5y"],
-        value="1y",
-        label_visibility="collapsed",
-    )
-    history_df = data_engine.get_price_history(ticker, period=period_choice)
-    if history_df is not None and not history_df.empty:
-        st.line_chart(history_df["Close"], height=280)
-    else:
-        st.info("ไม่มีข้อมูลราคาย้อนหลังสำหรับช่วงเวลานี้")
-
-    st.divider()
-
-    # --- งบการเงินย้อนหลัง 5 ปี ---
-    st.markdown("##### 🧾 งบการเงินย้อนหลัง")
-    with st.spinner("กำลังดึงงบการเงิน..."):
-        fin = data_engine.get_financials(ticker)
-
-    if not fin["ok"]:
-        st.warning(fin.get("error") or "ไม่พบข้อมูลงบการเงิน")
-        return
-
-    st.caption(f"พบข้อมูลย้อนหลัง {fin['years_available']} ปีงบการเงิน (ตามที่ Yahoo Finance เปิดให้ใช้งานฟรี)")
-
-    tab_income, tab_balance = st.tabs(["Income Statement", "Balance Sheet"])
-
-    with tab_income:
-        if fin["income_statement"].empty:
-            st.info("ไม่มีข้อมูล Income Statement")
-        else:
-            df = fin["income_statement"].copy()
-            df.columns = [c.strftime("%Y-%m-%d") if hasattr(c, "strftime") else str(c) for c in df.columns]
-            st.dataframe(df, use_container_width=True)
-
-    with tab_balance:
-        if fin["balance_sheet"].empty:
-            st.info("ไม่มีข้อมูล Balance Sheet")
-        else:
-            df = fin["balance_sheet"].copy()
-            df.columns = [c.strftime("%Y-%m-%d") if hasattr(c, "strftime") else str(c) for c in df.columns]
-            st.dataframe(df, use_container_width=True)
+    with col_ai:
+        # --- AI Co-Pilot Chat (Phase 4) ---
+        st.subheader("🤖 AI Co-Pilot")
+        st.caption("สอบถามความเห็นการลงทุน")
+        
+        if "chat_history" not in st.session_state:
+            st.session_state.chat_history = []
+            
+        # แสดงประวัติแชท
+        for msg in st.session_state.chat_history:
+            st.chat_message(msg["role"]).write(msg["text"])
+            
+        # ช่องพิมพ์ถาม AI
+        user_ask = st.chat_input(f"วิเคราะห์ {ticker} ให้หน่อย...")
+        if user_ask:
+            st.session_state.chat_history.append({"role": "user", "text": user_ask})
+            st.chat_message("user").write(user_ask)
+            
+            with st.spinner("AI กำลังวิเคราะห์ปัจจัยพื้นฐาน..."):
+                answer = ai_copilot.get_ai_analysis(ticker, summary, user_ask)
+                st.session_state.chat_history.append({"role": "assistant", "text": answer})
+                st.chat_message("assistant").write(answer)
 
 
 # ============================================================================
