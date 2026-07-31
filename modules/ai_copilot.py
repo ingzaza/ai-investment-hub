@@ -1,21 +1,22 @@
 """
 modules/ai_copilot.py
 ---------------------
-เชื่อมต่อ LLM (Claude) เพื่อวิเคราะห์หุ้นจาก Context ข้อมูลที่มี
+เชื่อมต่อ LLM (Gemini) เพื่อวิเคราะห์หุ้นจาก Context ข้อมูลที่มี (ใช้ API ฟรีของ Google)
 """
 import streamlit as st
-from langchain_anthropic import ChatAnthropic
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
 
 def get_ai_analysis(ticker: str, summary_data: dict, prompt: str) -> str:
     """ส่งข้อมูลทางการเงินให้ AI วิเคราะห์พร้อมคำถามจากผู้ใช้"""
     try:
         # เช็คว่ามี API Key ไหม
-        api_key = st.secrets.get("ANTHROPIC_API_KEY")
+        api_key = st.secrets.get("GEMINI_API_KEY")
         if not api_key:
-            return "⚠️ กรุณาตั้งค่า ANTHROPIC_API_KEY ใน Streamlit Secrets ก่อนใช้งาน"
+            return "⚠️ กรุณาตั้งค่า GEMINI_API_KEY ใน Streamlit Secrets ก่อนใช้งาน"
 
-        llm = ChatAnthropic(model="claude-3-haiku-20240307", api_key=api_key, temperature=0.3)
+        # ใช้โมเดล Gemini 1.5 Flash (รวดเร็วและฉลาด เหมาะกับการวิเคราะห์ข้อมูล)
+        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=api_key, temperature=0.3)
         
         # ปั้น Context ยัดใส่สมอง AI
         context = f"""
