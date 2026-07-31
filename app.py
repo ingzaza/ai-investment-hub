@@ -1,3 +1,9 @@
+import pandas as pd
+import streamlit as st
+
+# --- นำเข้า Module 1 ถึง 4 ---
+from modules import data_engine, watchlist_manager
+from modules import analytics_engine, scenario_engine, ai_copilot
 """
 app.py
 ------
