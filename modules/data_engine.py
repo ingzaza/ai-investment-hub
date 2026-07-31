@@ -1,10 +1,7 @@
 """
 modules/data_engine.py
 ------------------------
-รับผิดชอบการดึงข้อมูลตลาดทุนทั้งหมดจาก yfinance:
-  1. ตรวจสอบว่า ticker มีอยู่จริง (validate_ticker)
-  2. ราคาเรียลไทม์ + ข้อมูลราคาย้อนหลัง (get_realtime_price, get_price_history)
-  3. งบการเงินย้อนหลัง 5 ปี: Income Statement + Balance Sheet (get_financials)
+รับผิดชอบการดึงข้อมูลตลาดทุนทั้งหมดจาก yfinance (ใช้ history() แทน fast_info เพื่อความเสถียรบน Cloud)
 """
 
 from __future__ import annotations
@@ -16,7 +13,7 @@ import yfinance as yf
 
 from config import PRICE_CACHE_TTL, FINANCIALS_CACHE_TTL, FINANCIALS_LOOKBACK_YEARS
 
-# สร้าง session พร้อมกำหนด User-Agent เพื่อป้องกันโดน Yahoo Finance บล็อกบน Streamlit Cloud
+# สร้าง session พร้อมกำหนด User-Agent เพื่อป้องกันโดน Yahoo Finance บล็อก
 session = requests.Session()
 session.headers.update({
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
@@ -28,11 +25,11 @@ session.headers.update({
 # ============================================================================
 @st.cache_data(ttl=PRICE_CACHE_TTL, show_spinner=False)
 def validate_ticker(ticker: str) -> bool:
-    """เช็คว่า ticker นี้มีข้อมูลจริงบน Yahoo Finance หรือไม่"""
+    """เช็คว่า ticker นี้มีข้อมูลจริงบน Yahoo Finance หรือไม่ โดยเช็คจาก history"""
     try:
         tk = yf.Ticker(ticker, session=session)
-        fi = tk.fast_info
-        return fi.get("last_price") is not None
+        df = tk.history(period="5d")
+        return not df.empty
     except Exception:
         return False
 
@@ -42,33 +39,40 @@ def validate_ticker(ticker: str) -> bool:
 # ============================================================================
 @st.cache_data(ttl=PRICE_CACHE_TTL, show_spinner=False)
 def get_realtime_price(ticker: str) -> dict:
-    """ดึงราคาล่าสุด + ข้อมูล snapshot สั้น ๆ ของหุ้น 1 ตัว"""
+    """ดึงราคาล่าสุด + ข้อมูล snapshot จาก history (เสถียร ไม่พังง่าย)"""
     try:
         tk = yf.Ticker(ticker, session=session)
-        fi = tk.fast_info
+        hist = tk.history(period="5d")
 
-        last_price = fi.get("last_price")
-        prev_close = fi.get("previous_close")
-        change = None
-        change_pct = None
-        if last_price is not None and prev_close:
-            change = last_price - prev_close
-            change_pct = (change / prev_close) * 100
+        if hist.empty or len(hist) < 1:
+            return {"ticker": ticker, "ok": False, "error": "ไม่พบข้อมูลราคาจาก Yahoo Finance"}
+
+        last_price = float(hist["Close"].iloc[-1])
+        prev_close = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else last_price
+        change = last_price - prev_close
+        change_pct = (change / prev_close) * 100 if prev_close else 0.0
+
+        # ดึงข้อมูลเสริมจาก .info (ถ้าไม่ได้ ให้ข้ามไป)
+        info = {}
+        try:
+            info = tk.info
+        except Exception:
+            pass
 
         return {
             "ticker": ticker,
-            "ok": last_price is not None,
+            "ok": True,
             "last_price": last_price,
             "previous_close": prev_close,
             "change": change,
             "change_pct": change_pct,
-            "currency": fi.get("currency"),
-            "day_high": fi.get("day_high"),
-            "day_low": fi.get("day_low"),
-            "year_high": fi.get("year_high"),
-            "year_low": fi.get("year_low"),
-            "market_cap": fi.get("market_cap"),
-            "volume": fi.get("last_volume"),
+            "currency": info.get("currency", ""),
+            "day_high": float(hist["High"].iloc[-1]) if "High" in hist.columns else None,
+            "day_low": float(hist["Low"].iloc[-1]) if "Low" in hist.columns else None,
+            "year_high": info.get("fiftyTwoWeekHigh"),
+            "year_low": info.get("fiftyTwoWeekLow"),
+            "market_cap": info.get("marketCap"),
+            "volume": int(hist["Volume"].iloc[-1]) if "Volume" in hist.columns else None,
         }
     except Exception as e:
         return {"ticker": ticker, "ok": False, "error": str(e)}
